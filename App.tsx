@@ -1,6 +1,8 @@
-import React, {useMemo, useRef, useState} from 'react';
+import React, {useEffect, useMemo, useRef, useState} from 'react';
 import {ActivityIndicator, Alert, Keyboard, SafeAreaView, ScrollView, StatusBar, StyleSheet, Text, TextInput, TouchableOpacity, useColorScheme, View} from 'react-native';
 import * as Location from 'expo-location';
+import * as Speech from 'expo-speech';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import MapLibreGL from '@maplibre/maplibre-react-native';
 import boundary from './src/data/macedonia-boundary.json';
 import {createOutsideMask} from './src/services/geometry';
@@ -40,12 +42,16 @@ export default function App(){
  const dark=useColorScheme()==='dark',bg=dark?'#101827':'#f5f7fb',fg=dark?'#fff':'#172033';
  const [query,setQuery]=useState(''),[places,setPlaces]=useState<Place[]>([]),[selected,setSelected]=useState<Place|null>(null);
  const [origin,setOrigin]=useState<Coord|null>(null),[route,setRoute]=useState<any>(null),[routeInfo,setRouteInfo]=useState('');
+ const [favorites,setFavorites]=useState<Place[]>([]),[showFavorites,setShowFavorites]=useState(false),[instructions,setInstructions]=useState<string[]>([]);
  const [busy,setBusy]=useState(false),[ready,setReady]=useState(false),[tilted,setTilted]=useState(false),[active,setActive]=useState<string>('Истражи');
  const camera=useRef<any>(null),mapCenter=useRef<Coord>(CENTER),requestId=useRef(0);
  const mask=useMemo(()=>createOutsideMask(boundary as any),[]);
+ useEffect(()=>{AsyncStorage.getItem('mkspots:favorites').then(raw=>{if(raw)setFavorites(JSON.parse(raw));}).catch(()=>{});},[]);
+ async function toggleFavorite(){if(!selected)return;const next=favorites.some(p=>p.id===selected.id)?favorites.filter(p=>p.id!==selected.id):[...favorites,selected];setFavorites(next);try{await AsyncStorage.setItem('mkspots:favorites',JSON.stringify(next));}catch{Alert.alert('Зачувани','Не може да се зачува местото.');}}
+ function speakRoute(){if(!instructions.length){Alert.alert('Насоки','Прво пресметај рута.');return;}Speech.stop();Speech.speak(instructions.slice(0,8).join('. '),{language:'en-US',rate:0.9});}
  const cityMatches=query.trim().length>1?CITIES.filter(c=>(c.name+' '+c.aliases).toLowerCase().includes(query.trim().toLowerCase())).slice(0,5):[];
  function moveTo(p:Coord,zoom=14){mapCenter.current=p;camera.current?.setCamera({centerCoordinate:p,zoomLevel:zoom,animationDuration:650});}
- function choose(p:Place){setSelected(p);setQuery(p.name);setRoute(null);setRouteInfo('');Keyboard.dismiss();moveTo(p.coord);}
+ function choose(p:Place){setSelected(p);setQuery(p.name);setRoute(null);setRouteInfo('');setInstructions([]);Keyboard.dismiss();moveTo(p.coord);}
  async function searchText(){
   const q=query.trim();if(q.length<3){Alert.alert('Пребарување','Внеси најмалку 3 букви.');return;}
   Keyboard.dismiss();setBusy(true);
@@ -62,7 +68,7 @@ export default function App(){
   finally{setBusy(false);}
  }
  async function loadCategory(cat:Category){
-  setActive(cat);setSelected(null);setRoute(null);setRouteInfo('');
+  setActive(cat);setSelected(null);setRoute(null);setRouteInfo('');setInstructions([]);
   const id=++requestId.current;setBusy(true);
   try{
    const c=mapCenter.current;
@@ -100,12 +106,14 @@ export default function App(){
   if(!origin){Alert.alert('GPS','Прво притисни „Моја локација“.');return;}
   setBusy(true);
   try{
-   const url='https://router.project-osrm.org/route/v1/driving/'+origin.join(',')+';'+selected.coord.join(',')+'?overview=full&geometries=geojson';
+   const url='https://router.project-osrm.org/route/v1/driving/'+origin.join(',')+';'+selected.coord.join(',')+'?overview=full&geometries=geojson&steps=true';
    const res=await fetch(url);if(!res.ok)throw Error('Route unavailable');
    const json=await res.json(),best=json.routes?.[0];
    if(!best?.geometry?.coordinates?.length)throw Error('No route');
    if(!(best.geometry.coordinates as Coord[]).every(inCountry)){Alert.alert('Рута','Пресметаната рута излегува надвор од Македонија.');return;}
    setRoute({type:'Feature',properties:{},geometry:best.geometry});
+   const steps:string[]=(best.legs||[]).flatMap((leg:any)=>(leg.steps||[]).map((step:any)=>{const m=step.maneuver||{};return [m.modifier||m.type||'Continue',step.name?'onto '+step.name:'',Math.round(step.distance)+' meters'].filter(Boolean).join(' ');}));
+   setInstructions(steps);
    setRouteInfo((best.distance/1000).toFixed(1)+' km · '+Math.round(best.duration/60)+' мин (приближно)');
    const a=origin,b=selected.coord;
    camera.current?.fitBounds([Math.max(a[0],b[0]),Math.max(a[1],b[1])],[Math.min(a[0],b[0]),Math.min(a[1],b[1])],70,700);
@@ -141,12 +149,15 @@ export default function App(){
    <View style={styles.mapButtons}>
     <TouchableOpacity onPress={()=>{setTilted(!tilted);camera.current?.setCamera({pitch:tilted?0:55,animationDuration:450});}} style={[styles.floating,{backgroundColor:bg}]}><Text style={{color:fg,fontWeight:'700'}}>{tilted?'2D':'3D'}</Text></TouchableOpacity>
     <TouchableOpacity onPress={locate} style={[styles.floating,{backgroundColor:bg}]}><Text style={{color:fg}}>◎ GPS</Text></TouchableOpacity>
+    <TouchableOpacity onPress={()=>setShowFavorites(!showFavorites)} style={[styles.floating,{backgroundColor:bg}]}><Text style={{color:fg}}>☆ {favorites.length}</Text></TouchableOpacity>
    </View>
    <View style={[styles.bottomPanel,{backgroundColor:bg}]}>
     {busy&&<ActivityIndicator/>}
-    {selected?<><Text style={[styles.placeTitle,{color:fg}]} numberOfLines={2}>{selected.name}</Text><Text style={{color:dark?'#bdc9d8':'#526072'}} numberOfLines={2}>{selected.address||selected.category}</Text><TouchableOpacity onPress={routeTo} disabled={busy} style={styles.primary}><Text style={styles.white}>➜ Рута до местото</Text></TouchableOpacity></>:<Text style={{color:fg,textAlign:'center'}}>{places.length?places.length+' места · допри точка на мапата':'Избери категорија или пребарај место'}</Text>}
+    {showFavorites&&<ScrollView style={{maxHeight:110}}>{favorites.length?favorites.map(p=><TouchableOpacity key={p.id} onPress={()=>{choose(p);setShowFavorites(false);}} style={{padding:7}}><Text style={{color:fg}}>★ {p.name}</Text></TouchableOpacity>):<Text style={{color:fg}}>Нема зачувани места.</Text>}</ScrollView>}
+    {selected?<><Text style={[styles.placeTitle,{color:fg}]} numberOfLines={2}>{selected.name}</Text><Text style={{color:dark?'#bdc9d8':'#526072'}} numberOfLines={2}>{selected.address||selected.category}</Text><View style={{flexDirection:"row",gap:8}}><TouchableOpacity onPress={toggleFavorite} style={[styles.primary,{flex:1}]}><Text style={styles.white}>{favorites.some(p=>p.id===selected.id)?"★ Зачувано":"☆ Зачувај"}</Text></TouchableOpacity><TouchableOpacity onPress={routeTo} disabled={busy} style={[styles.primary,{flex:2}]}><Text style={styles.white}>➜ Пресметај рута</Text></TouchableOpacity></View></>:<Text style={{color:fg,textAlign:'center'}}>{places.length?places.length+' места · допри точка на мапата':'Избери категорија или пребарај место'}</Text>}
     {!!routeInfo&&<Text style={{color:fg,textAlign:'center'}}>{routeInfo}</Text>}
-    <Text style={{color:dark?'#aeb8c7':'#66758b',fontSize:10,textAlign:'center'}}>© OpenStreetMap contributors · Пробни рути, не за навигација при возење</Text>
+    {instructions.length>0&&<TouchableOpacity onPress={speakRoute} style={styles.primary}><Text style={styles.white}>🔊 Прочитај ги насоките (English)</Text></TouchableOpacity>}
+    <Text style={{color:dark?'#aeb8c7':'#66758b',fontSize:10,textAlign:'center'}}>© OpenStreetMap contributors · Гласовен преглед на рута, не live навигација</Text>
    </View>
   </View>
  </SafeAreaView>;
