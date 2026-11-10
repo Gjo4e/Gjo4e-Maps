@@ -1,0 +1,20 @@
+{
+  "expo": {
+    "name": "MK SPOTS",
+    "slug": "mk-spots",
+    "scheme": "mkspots",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "automatic",
+    "android": {
+      "package": "com.mkspots.app",
+      "permissions": [
+        "ACCESS_FINE_LOCATION",
+        "ACCESS_COARSE_LOCATION"
+      ]
+    },
+    "plugins": [
+      "@maplibre/maplibre-react-native"
+    ]
+  }
+}
