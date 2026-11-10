@@ -11,8 +11,6 @@ import {CENTER, CAMERA_BOUNDS, LIGHT_STYLE, DARK_STYLE, CITIES} from './src/conf
 type Coord=[number,number];
 type Place={id:string;name:string;coord:Coord;category:string;address?:string;website?:string};
 type Category='Ресторани'|'Продавници'|'Бензински'|'Аптеки'|'Болници'|'Кафулиња'|'Банкомати';
-const MAPTILER_KEY=process.env.EXPO_PUBLIC_MAPTILER_KEY||'';
-const SATELLITE_STYLE=MAPTILER_KEY?'https://api.maptiler.com/maps/hybrid/style.json?key='+encodeURIComponent(MAPTILER_KEY):'';
 const categories:Category[]=['Ресторани','Продавници','Бензински','Аптеки','Болници','Кафулиња','Банкомати'];
 const osmTags:Record<Category,string>={
  'Ресторани':'["amenity"="restaurant"]',
@@ -44,8 +42,8 @@ export default function App(){
  const dark=useColorScheme()==='dark',bg=dark?'#101827':'#f5f7fb',fg=dark?'#fff':'#172033';
  const [query,setQuery]=useState(''),[places,setPlaces]=useState<Place[]>([]),[selected,setSelected]=useState<Place|null>(null);
  const [origin,setOrigin]=useState<Coord|null>(null),[route,setRoute]=useState<any>(null),[routeInfo,setRouteInfo]=useState('');
- const [favorites,setFavorites]=useState<Place[]>([]),[showFavorites,setShowFavorites]=useState(false),[instructions,setInstructions]=useState<string[]>([]);
- const [satellite,setSatellite]=useState(false);const [busy,setBusy]=useState(false),[ready,setReady]=useState(false),[tilted,setTilted]=useState(false),[active,setActive]=useState<string>('Истражи');
+ const [showBuildings,setShowBuildings]=useState(true);const [favorites,setFavorites]=useState<Place[]>([]),[showFavorites,setShowFavorites]=useState(false),[instructions,setInstructions]=useState<string[]>([]);
+ const [busy,setBusy]=useState(false),[ready,setReady]=useState(false),[tilted,setTilted]=useState(false),[active,setActive]=useState<string>('Истражи');
  const camera=useRef<any>(null),mapCenter=useRef<Coord>(CENTER),requestId=useRef(0);
  const mask=useMemo(()=>createOutsideMask(boundary as any),[]);
  useEffect(()=>{AsyncStorage.getItem('mkspots:favorites').then(raw=>{if(raw)setFavorites(JSON.parse(raw));}).catch(()=>{});},[]);
@@ -75,9 +73,9 @@ export default function App(){
   try{
    const c=mapCenter.current;
    // Limit each request to the visible vicinity; public Overpass is not a production SLA.
-   const dLat=0.075,dLon=0.11,bbox=[c[1]-dLat,c[0]-dLon,c[1]+dLat,c[0]+dLon].join(',');
+   const dLat=0.11,dLon=0.15,bbox=[c[1]-dLat,c[0]-dLon,c[1]+dLat,c[0]+dLon].join(',');
    const tag=osmTags[cat];
-   const q='[out:json][timeout:20];(node'+tag+'('+bbox+');way'+tag+'('+bbox+'););out center 120;';
+   const q='[out:json][timeout:20];(node'+tag+'('+bbox+');way'+tag+'('+bbox+'););out center 250;';
    let json:any=null;
    for(const endpoint of ['https://overpass-api.de/api/interpreter','https://overpass.kumi.systems/api/interpreter']){
     try{
@@ -138,6 +136,13 @@ export default function App(){
   if(!Array.isArray(p)||p.length<2||!inCountry([p[0],p[1]]))return;
   choose({id:'point-'+p[0].toFixed(6)+'-'+p[1].toFixed(6),name:'Избрана точка',coord:[p[0],p[1]],category:'Точка на мапата'});
  }
+ async function openGoogleCategory(){
+  if(!categories.includes(active as Category)){Alert.alert('Google Maps','Прво избери категорија.');return;}
+  const terms:Record<Category,string>={'Ресторани':'restaurants','Продавници':'shops','Бензински':'gas stations','Аптеки':'pharmacies','Болници':'hospitals','Кафулиња':'cafes','Банкомати':'ATMs'};
+  const c=mapCenter.current;
+  const url='https://www.google.com/maps/search/?api=1&query='+encodeURIComponent(terms[active as Category]+' near '+c[1]+','+c[0]);
+  try{await Linking.openURL(url);}catch{Alert.alert('Google Maps','Не може да се отвори пребарувањето.');}
+ }
  const points=useMemo(()=>featureCollection(places),[places]);
  return <SafeAreaView style={[styles.root,{backgroundColor:bg}]}>
   <StatusBar barStyle={dark?'light-content':'dark-content'}/>
@@ -153,9 +158,9 @@ export default function App(){
    </ScrollView>
   </View>
   <View style={styles.mapWrap}>
-   <MapLibreGL.MapView key={(dark?'dark':'light')+(satellite?'-sat':'')} style={styles.map} mapStyle={satellite&&SATELLITE_STYLE?SATELLITE_STYLE:(dark?DARK_STYLE:LIGHT_STYLE)} attributionEnabled onPress={selectMapPoint} onDidFinishLoadingMap={()=>setReady(true)} onRegionDidChange={(e:any)=>{const c=e?.geometry?.coordinates;if(Array.isArray(c)&&c.length===2)mapCenter.current=[c[0],c[1]];}}>
+   <MapLibreGL.MapView key={dark?'dark':'light'} style={styles.map} mapStyle={dark?DARK_STYLE:LIGHT_STYLE} attributionEnabled onPress={selectMapPoint} onDidFinishLoadingMap={()=>setReady(true)} onRegionDidChange={(e:any)=>{const c=e?.geometry?.coordinates;if(Array.isArray(c)&&c.length===2)mapCenter.current=[c[0],c[1]];}}>
     <MapLibreGL.Camera ref={camera} defaultSettings={{centerCoordinate:CENTER,zoomLevel:7.2,pitch:0}} maxBounds={CAMERA_BOUNDS} minZoomLevel={6.5} maxZoomLevel={19}/>
-    {tilted&&<MapLibreGL.VectorSource id="buildings-source" url="https://tiles.openfreemap.org/planet"><MapLibreGL.FillExtrusionLayer id="buildings-3d" sourceLayerID="building" minZoomLevel={14} style={{fillExtrusionColor:dark?"#70839a":"#aab5c3",fillExtrusionHeight:["coalesce",["get","render_height"],["get","height"],12] as any,fillExtrusionBase:["coalesce",["get","render_min_height"],0] as any,fillExtrusionOpacity:0.85}}/></MapLibreGL.VectorSource>}
+    {showBuildings&&<MapLibreGL.VectorSource id="buildings-source" url="https://tiles.openfreemap.org/planet"><MapLibreGL.FillExtrusionLayer id="buildings-3d" sourceLayerID="building" minZoomLevel={14} style={{fillExtrusionColor:dark?"#70839a":"#aab5c3",fillExtrusionHeight:["coalesce",["get","render_height"],["get","height"],12] as any,fillExtrusionBase:["coalesce",["get","render_min_height"],0] as any,fillExtrusionOpacity:tilted?0.85:0.32}}/></MapLibreGL.VectorSource>}
     <MapLibreGL.ShapeSource id="country-mask" shape={mask as any}><MapLibreGL.FillLayer id="mask-fill" style={{fillColor:bg,fillOpacity:1}}/></MapLibreGL.ShapeSource>
     <MapLibreGL.ShapeSource id="places" shape={points} onPress={(event:any)=>{const id=event?.features?.[0]?.properties?.id;const p=places.find(x=>x.id===id);if(p)choose(p);}}>
      <MapLibreGL.CircleLayer id="places-dots" style={{circleColor:'#2563eb',circleRadius:7,circleStrokeWidth:2,circleStrokeColor:'#ffffff'}}/>
@@ -168,16 +173,16 @@ export default function App(){
    <View style={styles.mapButtons}>
     <TouchableOpacity onPress={()=>{setTilted(!tilted);camera.current?.setCamera({pitch:tilted?0:55,animationDuration:450});}} style={[styles.floating,{backgroundColor:bg}]}><Text style={{color:fg,fontWeight:'700'}}>{tilted?'2D':'3D 🏢'}</Text></TouchableOpacity>
     <TouchableOpacity onPress={locate} style={[styles.floating,{backgroundColor:bg}]}><Text style={{color:fg}}>◎ GPS</Text></TouchableOpacity>
-    <TouchableOpacity onPress={()=>SATELLITE_STYLE?setSatellite(v=>!v):Alert.alert('Сателитска мапа','Потребен е овластен MapTiler API клуч во GitHub Actions secret MAPTILER_API_KEY.')} style={[styles.floating,{backgroundColor:bg}]}><Text style={{color:fg}}>{satellite?'🗺️ Мапа':'🛰️ Сателит'}</Text></TouchableOpacity>
+    <TouchableOpacity onPress={()=>setShowBuildings(v=>!v)} style={[styles.floating,{backgroundColor:bg}]}><Text style={{color:fg}}>⌂ {showBuildings?'Згради':'Вклучи згради'}</Text></TouchableOpacity>
     <TouchableOpacity onPress={()=>setShowFavorites(!showFavorites)} style={[styles.floating,{backgroundColor:bg}]}><Text style={{color:fg}}>☆ {favorites.length}</Text></TouchableOpacity>
    </View>
    <View style={[styles.bottomPanel,{backgroundColor:bg}]}>
     {busy&&<ActivityIndicator/>}
+    {categories.includes(active as Category)&&<TouchableOpacity onPress={openGoogleCategory} style={styles.primary}><Text style={styles.white}>🔎 {active} во Google Maps</Text></TouchableOpacity>}
     {showFavorites&&<ScrollView style={{maxHeight:110}}>{favorites.length?favorites.map(p=><TouchableOpacity key={p.id} onPress={()=>{choose(p);setShowFavorites(false);}} style={{padding:7}}><Text style={{color:fg}}>★ {p.name}</Text></TouchableOpacity>):<Text style={{color:fg}}>Нема зачувани места.</Text>}</ScrollView>}
     {selected?<><Text style={[styles.placeTitle,{color:fg}]} numberOfLines={2}>{selected.name}</Text><Text style={{color:dark?'#bdc9d8':'#526072'}} numberOfLines={2}>{selected.address||selected.category}</Text><View style={{flexDirection:"row",gap:8}}><TouchableOpacity onPress={toggleFavorite} style={[styles.primary,{flex:1}]}><Text style={styles.white}>{favorites.some(p=>p.id===selected.id)?"★ Зачувано":"☆ Зачувај"}</Text></TouchableOpacity><TouchableOpacity onPress={startNavigation} style={[styles.primary,{flex:2}]}><Text style={styles.white}>➜ Навигација</Text></TouchableOpacity></View><TouchableOpacity onPress={routeTo} disabled={busy} style={styles.primary}><Text style={styles.white}>Преглед на рута во MK SPOTS</Text></TouchableOpacity></>:<Text style={{color:fg,textAlign:'center'}}>{places.length?places.length+' места · допри точка на мапата':'Допрете на мапата за цел или пребарајте место'}</Text>}
     {!!routeInfo&&<Text style={{color:fg,textAlign:'center'}}>{routeInfo}</Text>}
     {instructions.length>0&&<TouchableOpacity onPress={speakRoute} style={styles.primary}><Text style={styles.white}>🔊 Прочитај ги насоките (English)</Text></TouchableOpacity>}
-    {satellite&&<Text style={{color:fg,fontSize:10,textAlign:'center'}}>© MapTiler · © OpenStreetMap contributors</Text>}
     <Text style={{color:dark?'#aeb8c7':'#66758b',fontSize:10,textAlign:'center'}}>© OpenStreetMap contributors · Гласовен преглед на рута, не live навигација</Text>
    </View>
   </View>
