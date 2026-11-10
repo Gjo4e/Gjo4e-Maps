@@ -1,5 +1,5 @@
 import React, {useEffect, useMemo, useRef, useState} from 'react';
-import {ActivityIndicator, Alert, Keyboard, SafeAreaView, ScrollView, StatusBar, StyleSheet, Text, TextInput, TouchableOpacity, useColorScheme, View} from 'react-native';
+import {ActivityIndicator, Alert, Keyboard, Linking, SafeAreaView, ScrollView, StatusBar, StyleSheet, Text, TextInput, TouchableOpacity, useColorScheme, View} from 'react-native';
 import * as Location from 'expo-location';
 import * as Speech from 'expo-speech';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -78,9 +78,14 @@ export default function App(){
    const dLat=0.075,dLon=0.11,bbox=[c[1]-dLat,c[0]-dLon,c[1]+dLat,c[0]+dLon].join(',');
    const tag=osmTags[cat];
    const q='[out:json][timeout:20];(node'+tag+'('+bbox+');way'+tag+'('+bbox+'););out center 120;';
-   const response=await fetch('https://overpass.kumi.systems/api/interpreter',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:'data='+encodeURIComponent(q)});
-   if(!response.ok)throw Error('Overpass HTTP '+response.status);
-   const json=await response.json();
+   let json:any=null;
+   for(const endpoint of ['https://overpass-api.de/api/interpreter','https://overpass.kumi.systems/api/interpreter']){
+    try{
+     const response=await fetch(endpoint,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:'data='+encodeURIComponent(q)});
+     if(response.ok){json=await response.json();break;}
+    }catch{}
+   }
+   if(!json)throw Error('Places service unavailable');
    const found:Place[]=(json.elements||[]).map((x:any)=>{
     const lat=x.lat??x.center?.lat,lon=x.lon??x.center?.lon;
     return {id:x.type+x.id,name:x.tags?.['name:mk']||x.tags?.name||cat,coord:[lon,lat] as Coord,category:cat,address:[x.tags?.['addr:street'],x.tags?.['addr:housenumber']].filter(Boolean).join(' '),website:x.tags?.website};
@@ -122,6 +127,17 @@ export default function App(){
   }catch{Alert.alert('Рута','Routing серверот не е достапен.');}
   finally{setBusy(false);}
  }
+ async function startNavigation(){
+  if(!selected)return;
+  const [lon,lat]=selected.coord;
+  const url='https://www.google.com/maps/dir/?api=1&destination='+lat+','+lon+'&travelmode=driving&dir_action=navigate';
+  try{await Linking.openURL(url);}catch{Alert.alert('Навигација','Не може да се отвори навигацијата.');}
+ }
+ function selectMapPoint(event:any){
+  const p=event?.geometry?.coordinates;
+  if(!Array.isArray(p)||p.length<2||!inCountry([p[0],p[1]]))return;
+  choose({id:'point-'+p[0].toFixed(6)+'-'+p[1].toFixed(6),name:'Избрана точка',coord:[p[0],p[1]],category:'Точка на мапата'});
+ }
  const points=useMemo(()=>featureCollection(places),[places]);
  return <SafeAreaView style={[styles.root,{backgroundColor:bg}]}>
   <StatusBar barStyle={dark?'light-content':'dark-content'}/>
@@ -137,7 +153,7 @@ export default function App(){
    </ScrollView>
   </View>
   <View style={styles.mapWrap}>
-   <MapLibreGL.MapView key={(dark?'dark':'light')+(satellite?'-sat':'')} style={styles.map} mapStyle={satellite&&SATELLITE_STYLE?SATELLITE_STYLE:(dark?DARK_STYLE:LIGHT_STYLE)} attributionEnabled onDidFinishLoadingMap={()=>setReady(true)} onRegionDidChange={(e:any)=>{const c=e?.geometry?.coordinates;if(Array.isArray(c)&&c.length===2)mapCenter.current=[c[0],c[1]];}}>
+   <MapLibreGL.MapView key={(dark?'dark':'light')+(satellite?'-sat':'')} style={styles.map} mapStyle={satellite&&SATELLITE_STYLE?SATELLITE_STYLE:(dark?DARK_STYLE:LIGHT_STYLE)} attributionEnabled onPress={selectMapPoint} onDidFinishLoadingMap={()=>setReady(true)} onRegionDidChange={(e:any)=>{const c=e?.geometry?.coordinates;if(Array.isArray(c)&&c.length===2)mapCenter.current=[c[0],c[1]];}}>
     <MapLibreGL.Camera ref={camera} defaultSettings={{centerCoordinate:CENTER,zoomLevel:7.2,pitch:0}} maxBounds={CAMERA_BOUNDS} minZoomLevel={6.5} maxZoomLevel={19}/>
     {tilted&&<MapLibreGL.VectorSource id="buildings-source" url="https://tiles.openfreemap.org/planet"><MapLibreGL.FillExtrusionLayer id="buildings-3d" sourceLayerID="building" minZoomLevel={14} style={{fillExtrusionColor:dark?"#70839a":"#aab5c3",fillExtrusionHeight:["coalesce",["get","render_height"],["get","height"],12] as any,fillExtrusionBase:["coalesce",["get","render_min_height"],0] as any,fillExtrusionOpacity:0.85}}/></MapLibreGL.VectorSource>}
     <MapLibreGL.ShapeSource id="country-mask" shape={mask as any}><MapLibreGL.FillLayer id="mask-fill" style={{fillColor:bg,fillOpacity:1}}/></MapLibreGL.ShapeSource>
@@ -158,7 +174,7 @@ export default function App(){
    <View style={[styles.bottomPanel,{backgroundColor:bg}]}>
     {busy&&<ActivityIndicator/>}
     {showFavorites&&<ScrollView style={{maxHeight:110}}>{favorites.length?favorites.map(p=><TouchableOpacity key={p.id} onPress={()=>{choose(p);setShowFavorites(false);}} style={{padding:7}}><Text style={{color:fg}}>★ {p.name}</Text></TouchableOpacity>):<Text style={{color:fg}}>Нема зачувани места.</Text>}</ScrollView>}
-    {selected?<><Text style={[styles.placeTitle,{color:fg}]} numberOfLines={2}>{selected.name}</Text><Text style={{color:dark?'#bdc9d8':'#526072'}} numberOfLines={2}>{selected.address||selected.category}</Text><View style={{flexDirection:"row",gap:8}}><TouchableOpacity onPress={toggleFavorite} style={[styles.primary,{flex:1}]}><Text style={styles.white}>{favorites.some(p=>p.id===selected.id)?"★ Зачувано":"☆ Зачувај"}</Text></TouchableOpacity><TouchableOpacity onPress={routeTo} disabled={busy} style={[styles.primary,{flex:2}]}><Text style={styles.white}>➜ Пресметај рута</Text></TouchableOpacity></View></>:<Text style={{color:fg,textAlign:'center'}}>{places.length?places.length+' места · допри точка на мапата':'Избери категорија или пребарај место'}</Text>}
+    {selected?<><Text style={[styles.placeTitle,{color:fg}]} numberOfLines={2}>{selected.name}</Text><Text style={{color:dark?'#bdc9d8':'#526072'}} numberOfLines={2}>{selected.address||selected.category}</Text><View style={{flexDirection:"row",gap:8}}><TouchableOpacity onPress={toggleFavorite} style={[styles.primary,{flex:1}]}><Text style={styles.white}>{favorites.some(p=>p.id===selected.id)?"★ Зачувано":"☆ Зачувај"}</Text></TouchableOpacity><TouchableOpacity onPress={startNavigation} style={[styles.primary,{flex:2}]}><Text style={styles.white}>➜ Навигација</Text></TouchableOpacity></View><TouchableOpacity onPress={routeTo} disabled={busy} style={styles.primary}><Text style={styles.white}>Преглед на рута во MK SPOTS</Text></TouchableOpacity></>:<Text style={{color:fg,textAlign:'center'}}>{places.length?places.length+' места · допри точка на мапата':'Допрете на мапата за цел или пребарајте место'}</Text>}
     {!!routeInfo&&<Text style={{color:fg,textAlign:'center'}}>{routeInfo}</Text>}
     {instructions.length>0&&<TouchableOpacity onPress={speakRoute} style={styles.primary}><Text style={styles.white}>🔊 Прочитај ги насоките (English)</Text></TouchableOpacity>}
     {satellite&&<Text style={{color:fg,fontSize:10,textAlign:'center'}}>© MapTiler · © OpenStreetMap contributors</Text>}
