@@ -1,6 +1,6 @@
 {
   "name": "mk-spots",
-  "version": "0.3.0",
+  "version": "0.5.0",
   "private": true,
   "scripts": {
     "start": "expo start --dev-client",
@@ -13,7 +13,9 @@
     "expo-location": "~19.0.7",
     "react": "19.1.0",
     "react-native": "0.81.5",
-    "@maplibre/maplibre-react-native": "^10.0.0"
+    "@maplibre/maplibre-react-native": "^10.0.0",
+    "expo-speech": "~14.0.8",
+    "@react-native-async-storage/async-storage": "2.2.0"
   },
   "devDependencies": {
     "typescript": "~5.9.2",
