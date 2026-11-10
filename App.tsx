@@ -1,83 +1,163 @@
 import React, {useMemo, useRef, useState} from 'react';
-import {ActivityIndicator, Alert, SafeAreaView, ScrollView, StatusBar, StyleSheet, Text, TextInput, TouchableOpacity, useColorScheme, View} from 'react-native';
+import {ActivityIndicator, Alert, Keyboard, SafeAreaView, ScrollView, StatusBar, StyleSheet, Text, TextInput, TouchableOpacity, useColorScheme, View} from 'react-native';
 import * as Location from 'expo-location';
 import MapLibreGL from '@maplibre/maplibre-react-native';
 import boundary from './src/data/macedonia-boundary.json';
 import {createOutsideMask} from './src/services/geometry';
 import {CENTER, CAMERA_BOUNDS, LIGHT_STYLE, DARK_STYLE, CITIES} from './src/config/map';
 
-type Coord = [number,number];
-const withinBounds = (p: Coord) => p[0]>=20.35 && p[0]<=23.15 && p[1]>=40.8 && p[1]<=42.45;
-export default function App() {
- const dark=useColorScheme()==='dark', bg=dark?'#101827':'#f4f7fa', fg=dark?'#fff':'#111827';
- const [query,setQuery]=useState(''), [ready,setReady]=useState(false);
- const [tilted,setTilted]=useState(false), [category,setCategory]=useState('Истражи');
- const [origin,setOrigin]=useState<Coord|null>(null),[destination,setDestination]=useState<Coord|null>(null);
- const [route,setRoute]=useState<any>(null),[routeInfo,setRouteInfo]=useState(''),[busy,setBusy]=useState(false);
- const camera=useRef<any>(null);
+type Coord=[number,number];
+type Place={id:string;name:string;coord:Coord;category:string;address?:string;website?:string};
+type Category='Ресторани'|'Продавници'|'Бензински'|'Аптеки'|'Болници'|'Кафулиња'|'Банкомати';
+const categories:Category[]=['Ресторани','Продавници','Бензински','Аптеки','Болници','Кафулиња','Банкомати'];
+const osmTags:Record<Category,string>={
+ 'Ресторани':'["amenity"="restaurant"]',
+ 'Продавници':'["shop"]',
+ 'Бензински':'["amenity"="fuel"]',
+ 'Аптеки':'["amenity"="pharmacy"]',
+ 'Болници':'["amenity"="hospital"]',
+ 'Кафулиња':'["amenity"="cafe"]',
+ 'Банкомати':'["amenity"="atm"]'
+};
+function inCountry(p:Coord):boolean {
+ const g:any=(boundary as any).features?.[0]?.geometry;
+ if(!g)return false;
+ const polygons=g.type==='Polygon'?[g.coordinates]:g.coordinates;
+ const inside=(ring:number[][])=>{
+  let hit=false;
+  for(let i=0,j=ring.length-1;i<ring.length;j=i++){
+   const a=ring[i],b=ring[j];
+   if(((a[1]>p[1])!==(b[1]>p[1]))&&(p[0]<(b[0]-a[0])*(p[1]-a[1])/(b[1]-a[1])+a[0]))hit=!hit;
+  }
+  return hit;
+ };
+ return polygons.some((poly:number[][][])=>inside(poly[0])&&!poly.slice(1).some(inside));
+}
+function featureCollection(items:Place[]):any {
+ return {type:'FeatureCollection',features:items.map(p=>({type:'Feature',properties:{id:p.id},geometry:{type:'Point',coordinates:p.coord}}))};
+}
+export default function App(){
+ const dark=useColorScheme()==='dark',bg=dark?'#101827':'#f5f7fb',fg=dark?'#fff':'#172033';
+ const [query,setQuery]=useState(''),[places,setPlaces]=useState<Place[]>([]),[selected,setSelected]=useState<Place|null>(null);
+ const [origin,setOrigin]=useState<Coord|null>(null),[route,setRoute]=useState<any>(null),[routeInfo,setRouteInfo]=useState('');
+ const [busy,setBusy]=useState(false),[ready,setReady]=useState(false),[tilted,setTilted]=useState(false),[active,setActive]=useState<string>('Истражи');
+ const camera=useRef<any>(null),mapCenter=useRef<Coord>(CENTER),requestId=useRef(0);
  const mask=useMemo(()=>createOutsideMask(boundary as any),[]);
- const results=query.trim().length>1?CITIES.filter(c=>(c.name+' '+c.aliases).toLowerCase().includes(query.trim().toLowerCase())).slice(0,6):[];
- function chooseCity(city:typeof CITIES[number]){
-  const p:Coord=[city.coords[0],city.coords[1]];
-  setQuery(city.name);setDestination(p);setRoute(null);setRouteInfo('');
-  camera.current?.setCamera({centerCoordinate:p,zoomLevel:12,animationDuration:800});
+ const cityMatches=query.trim().length>1?CITIES.filter(c=>(c.name+' '+c.aliases).toLowerCase().includes(query.trim().toLowerCase())).slice(0,5):[];
+ function moveTo(p:Coord,zoom=14){mapCenter.current=p;camera.current?.setCamera({centerCoordinate:p,zoomLevel:zoom,animationDuration:650});}
+ function choose(p:Place){setSelected(p);setQuery(p.name);setRoute(null);setRouteInfo('');Keyboard.dismiss();moveTo(p.coord);}
+ async function searchText(){
+  const q=query.trim();if(q.length<3){Alert.alert('Пребарување','Внеси најмалку 3 букви.');return;}
+  Keyboard.dismiss();setBusy(true);
+  try{
+   // Submit-only search; no autocomplete requests to public Nominatim.
+   const url='https://nominatim.openstreetmap.org/search?format=jsonv2&limit=15&countrycodes=mk&q='+encodeURIComponent(q);
+   const res=await fetch(url,{headers:{'Accept-Language':'mk,en'}});
+   if(!res.ok)throw Error('Search unavailable');
+   const data=await res.json();
+   const found:Place[]=data.map((x:any)=>({id:'n'+x.place_id,name:x.display_name?.split(',')[0]||q,coord:[Number(x.lon),Number(x.lat)] as Coord,category:x.type||'Место',address:x.display_name})).filter((p:Place)=>inCountry(p.coord));
+   setPlaces(found);setActive('Пребарување');
+   if(found.length)moveTo(found[0].coord,12);else Alert.alert('Нема резултати','Не се пронајдени места во Македонија.');
+  }catch{Alert.alert('Пребарување','Сервисот моментално не е достапен.');}
+  finally{setBusy(false);}
+ }
+ async function loadCategory(cat:Category){
+  setActive(cat);setSelected(null);setRoute(null);setRouteInfo('');
+  const id=++requestId.current;setBusy(true);
+  try{
+   const c=mapCenter.current;
+   // Limit each request to the visible vicinity; public Overpass is not a production SLA.
+   const dLat=0.075,dLon=0.11,bbox=[c[1]-dLat,c[0]-dLon,c[1]+dLat,c[0]+dLon].join(',');
+   const tag=osmTags[cat];
+   const q='[out:json][timeout:20];(node'+tag+'('+bbox+');way'+tag+'('+bbox+'););out center 120;';
+   const response=await fetch('https://overpass.kumi.systems/api/interpreter',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:'data='+encodeURIComponent(q)});
+   if(!response.ok)throw Error('Overpass HTTP '+response.status);
+   const json=await response.json();
+   const found:Place[]=(json.elements||[]).map((x:any)=>{
+    const lat=x.lat??x.center?.lat,lon=x.lon??x.center?.lon;
+    return {id:x.type+x.id,name:x.tags?.['name:mk']||x.tags?.name||cat,coord:[lon,lat] as Coord,category:cat,address:[x.tags?.['addr:street'],x.tags?.['addr:housenumber']].filter(Boolean).join(' '),website:x.tags?.website};
+   }).filter((p:Place)=>Number.isFinite(p.coord[0])&&Number.isFinite(p.coord[1])&&inCountry(p.coord)).slice(0,120);
+   if(id!==requestId.current)return;
+   setPlaces(found);
+   if(!found.length)Alert.alert(cat,'Нема означени објекти во овој дел од мапата. Приближи друг град и обиди се повторно.');
+  }catch{Alert.alert('Места','Сервисот за објекти е привремено недостапен.');}
+  finally{if(id===requestId.current)setBusy(false);}
  }
  async function locate(){
-  try{
-   setBusy(true);
-   const permission=await Location.requestForegroundPermissionsAsync();
-   if(permission.status!=='granted'){Alert.alert('GPS','Потребна е дозвола за локација.');return;}
-   const pos=await Location.getCurrentPositionAsync({accuracy:Location.Accuracy.Balanced});
-   const p:Coord=[pos.coords.longitude,pos.coords.latitude];
-   if(!withinBounds(p)){Alert.alert('Локација','GPS позицијата е надвор од поддржаната област.');return;}
-   setOrigin(p);camera.current?.setCamera({centerCoordinate:p,zoomLevel:14,animationDuration:700});
-  }catch(e){Alert.alert('GPS грешка','Не можам да ја добијам локацијата.');}
-  finally{setBusy(false);}
- }
- async function calculateRoute(){
-  if(!origin||!destination){Alert.alert('Рута','Прво притисни GPS и избери град од пребарувањето.');return;}
   setBusy(true);
   try{
-   // OSRM demo is for testing only, not a production routing service.
-   const url='https://router.project-osrm.org/route/v1/driving/'+origin.join(',')+';'+destination.join(',')+'?overview=full&geometries=geojson';
-   const response=await fetch(url);
-   if(!response.ok)throw new Error('Routing HTTP '+response.status);
-   const json=await response.json(), best=json.routes?.[0];
-   if(!best?.geometry?.coordinates?.length)throw new Error('No route');
-   const coordinates=best.geometry.coordinates as Coord[];
-   if(coordinates.some(p=>!withinBounds(p))){Alert.alert('Рута','Рутата излегува надвор од Македонија и не може да се прикаже.');return;}
-   setRoute({type:'Feature',properties:{},geometry:best.geometry});
-   setRouteInfo((best.distance/1000).toFixed(1)+' km · '+Math.round(best.duration/60)+' мин (проценка)');
-   camera.current?.fitBounds([Math.max(origin[0],destination[0]),Math.max(origin[1],destination[1])],[Math.min(origin[0],destination[0]),Math.min(origin[1],destination[1])],70,800);
-  }catch(e){Alert.alert('Рута недостапна','Пробната routing услуга не врати рута. Обиди се повторно.');}
+   const permission=await Location.requestForegroundPermissionsAsync();
+   if(permission.status!=='granted'){Alert.alert('GPS','Дозволи пристап до локацијата во Android Settings.');return;}
+   const pos=await Location.getCurrentPositionAsync({accuracy:Location.Accuracy.High});
+   const p:Coord=[pos.coords.longitude,pos.coords.latitude];
+   if(!inCountry(p)){Alert.alert('GPS','Моменталната локација не е во Македонија.');return;}
+   setOrigin(p);moveTo(p,15);
+  }catch{Alert.alert('GPS','Не можам да ја прочитам локацијата. Провери дали GPS е вклучен.');}
   finally{setBusy(false);}
  }
+ async function routeTo(){
+  if(!selected){Alert.alert('Рута','Прво избери место од резултатите.');return;}
+  if(!origin){Alert.alert('GPS','Прво притисни „Моја локација“.');return;}
+  setBusy(true);
+  try{
+   const url='https://router.project-osrm.org/route/v1/driving/'+origin.join(',')+';'+selected.coord.join(',')+'?overview=full&geometries=geojson';
+   const res=await fetch(url);if(!res.ok)throw Error('Route unavailable');
+   const json=await res.json(),best=json.routes?.[0];
+   if(!best?.geometry?.coordinates?.length)throw Error('No route');
+   if(!(best.geometry.coordinates as Coord[]).every(inCountry)){Alert.alert('Рута','Пресметаната рута излегува надвор од Македонија.');return;}
+   setRoute({type:'Feature',properties:{},geometry:best.geometry});
+   setRouteInfo((best.distance/1000).toFixed(1)+' km · '+Math.round(best.duration/60)+' мин (приближно)');
+   const a=origin,b=selected.coord;
+   camera.current?.fitBounds([Math.max(a[0],b[0]),Math.max(a[1],b[1])],[Math.min(a[0],b[0]),Math.min(a[1],b[1])],70,700);
+  }catch{Alert.alert('Рута','Routing серверот не е достапен.');}
+  finally{setBusy(false);}
+ }
+ const points=useMemo(()=>featureCollection(places),[places]);
  return <SafeAreaView style={[styles.root,{backgroundColor:bg}]}>
   <StatusBar barStyle={dark?'light-content':'dark-content'}/>
   <View style={[styles.header,{backgroundColor:bg}]}>
    <Text style={[styles.title,{color:fg}]}>🇲🇰 MK SPOTS</Text>
-   <TextInput value={query} onChangeText={setQuery} placeholder="Пребарај град во Македонија" placeholderTextColor="#8993a3" style={[styles.search,{color:fg,backgroundColor:dark?'#1f2937':'#e5e7eb'}]}/>
-   <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chips}>{["Истражи","Ресторани","Продавници","Бензински"].map(c=><TouchableOpacity key={c} onPress={()=>{setCategory(c);if(c!=="Истражи")Alert.alert(c,"Пребарување на сите објекти од оваа категорија ќе биде додадено со Places API.");}} style={[styles.chip,{backgroundColor:category===c?"#2563eb":dark?"#293345":"#e2e8f0"}]}><Text style={{color:category===c?"white":fg,fontWeight:"600"}}>{c}</Text></TouchableOpacity>)}</ScrollView>
-   {results.length>0&&<View style={[styles.results,{backgroundColor:dark?'#1f2937':'#fff'}]}>{results.map(city=><TouchableOpacity key={city.name} onPress={()=>chooseCity(city)} style={styles.result}><Text style={{color:fg}}>📍 {city.name}</Text></TouchableOpacity>)}</View>}
+   <View style={styles.searchRow}>
+    <TextInput value={query} onChangeText={setQuery} onSubmitEditing={searchText} returnKeyType="search" placeholder="Пребарај место или адреса" placeholderTextColor="#8993a3" style={[styles.search,{color:fg,backgroundColor:dark?'#253247':'#e8edf4'}]}/>
+    <TouchableOpacity onPress={searchText} disabled={busy} style={styles.searchButton}><Text style={styles.white}>⌕</Text></TouchableOpacity>
+   </View>
+   {cityMatches.length>0&&<ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.cityRow}>{cityMatches.map(c=><TouchableOpacity key={c.name} style={styles.city} onPress={()=>choose({id:c.name,name:c.name,coord:[c.coords[0],c.coords[1]],category:'Град'})}><Text style={{color:fg}}>📍 {c.name}</Text></TouchableOpacity>)}</ScrollView>}
+   <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chips}>
+    {categories.map(c=><TouchableOpacity key={c} disabled={busy} onPress={()=>loadCategory(c)} style={[styles.chip,{backgroundColor:active===c?'#2563eb':dark?'#253247':'#e8edf4'}]}><Text style={{color:active===c?'white':fg}}>{c}</Text></TouchableOpacity>)}
+   </ScrollView>
   </View>
   <View style={styles.mapWrap}>
-   <MapLibreGL.MapView key={dark?'dark':'light'} style={styles.map} mapStyle={dark?DARK_STYLE:LIGHT_STYLE} onDidFinishLoadingMap={()=>setReady(true)} attributionEnabled={true}>
+   <MapLibreGL.MapView key={dark?'dark':'light'} style={styles.map} mapStyle={dark?DARK_STYLE:LIGHT_STYLE} attributionEnabled onDidFinishLoadingMap={()=>setReady(true)} onRegionDidChange={(e:any)=>{const c=e?.geometry?.coordinates;if(Array.isArray(c)&&c.length===2)mapCenter.current=[c[0],c[1]];}}>
     <MapLibreGL.Camera ref={camera} defaultSettings={{centerCoordinate:CENTER,zoomLevel:7.2,pitch:0}} maxBounds={CAMERA_BOUNDS} minZoomLevel={6.5} maxZoomLevel={19}/>
-    <MapLibreGL.ShapeSource id="outside-country" shape={mask as any}><MapLibreGL.FillLayer id="outside-fill" style={{fillColor:bg,fillOpacity:1}}/></MapLibreGL.ShapeSource>
-    {route&&<MapLibreGL.ShapeSource id="route" shape={route}><MapLibreGL.LineLayer id="route-line" style={{lineColor:'#2979ff',lineWidth:5,lineOpacity:0.9}}/></MapLibreGL.ShapeSource>}
-    {origin&&<MapLibreGL.PointAnnotation id="my-position" coordinate={origin}/>}
-    {destination&&<MapLibreGL.PointAnnotation id="destination" coordinate={destination}/>}
+    <MapLibreGL.ShapeSource id="country-mask" shape={mask as any}><MapLibreGL.FillLayer id="mask-fill" style={{fillColor:bg,fillOpacity:1}}/></MapLibreGL.ShapeSource>
+    <MapLibreGL.ShapeSource id="places" shape={points} onPress={(event:any)=>{const id=event?.features?.[0]?.properties?.id;const p=places.find(x=>x.id===id);if(p)choose(p);}}>
+     <MapLibreGL.CircleLayer id="places-dots" style={{circleColor:'#2563eb',circleRadius:7,circleStrokeWidth:2,circleStrokeColor:'#ffffff'}}/>
+    </MapLibreGL.ShapeSource>
+    {route&&<MapLibreGL.ShapeSource id="route" shape={route}><MapLibreGL.LineLayer id="route-line" style={{lineColor:'#267bff',lineWidth:6}}/></MapLibreGL.ShapeSource>}
+    {origin&&<MapLibreGL.PointAnnotation id="gps-position" coordinate={origin}/>}
+    {selected&&<MapLibreGL.PointAnnotation id="selected-place" coordinate={selected.coord}/>}
    </MapLibreGL.MapView>
    {!ready&&<View style={[styles.loading,{backgroundColor:bg}]}><ActivityIndicator/><Text style={{color:fg}}>Се вчитува мапата…</Text></View>}
-   <View style={styles.mapButtons}><TouchableOpacity onPress={()=>{setTilted(!tilted);camera.current?.setCamera({pitch:tilted?0:55,animationDuration:500});}} style={[styles.floating,{backgroundColor:bg}]}><Text style={{color:fg,fontWeight:"700"}}>{tilted?"2D":"3D"}</Text></TouchableOpacity><TouchableOpacity onPress={()=>Alert.alert("Satellite","За сателитски снимки ни треба лиценциран imagery provider. Засега е достапна деталната мапа.")} style={[styles.floating,{backgroundColor:bg}]}><Text style={{color:fg}}>▧ Слоеви</Text></TouchableOpacity></View>
-   <View style={[styles.controls,{backgroundColor:bg}]}>
-    <TouchableOpacity disabled={busy} onPress={locate} style={styles.button}><Text style={styles.buttonText}>◎ Моја локација</Text></TouchableOpacity>
-    <TouchableOpacity disabled={busy} onPress={calculateRoute} style={styles.button}><Text style={styles.buttonText}>➜ Пресметај рута</Text></TouchableOpacity>
+   <View style={styles.mapButtons}>
+    <TouchableOpacity onPress={()=>{setTilted(!tilted);camera.current?.setCamera({pitch:tilted?0:55,animationDuration:450});}} style={[styles.floating,{backgroundColor:bg}]}><Text style={{color:fg,fontWeight:'700'}}>{tilted?'2D':'3D'}</Text></TouchableOpacity>
+    <TouchableOpacity onPress={locate} style={[styles.floating,{backgroundColor:bg}]}><Text style={{color:fg}}>◎ GPS</Text></TouchableOpacity>
+   </View>
+   <View style={[styles.bottomPanel,{backgroundColor:bg}]}>
+    {busy&&<ActivityIndicator/>}
+    {selected?<><Text style={[styles.placeTitle,{color:fg}]} numberOfLines={2}>{selected.name}</Text><Text style={{color:dark?'#bdc9d8':'#526072'}} numberOfLines={2}>{selected.address||selected.category}</Text><TouchableOpacity onPress={routeTo} disabled={busy} style={styles.primary}><Text style={styles.white}>➜ Рута до местото</Text></TouchableOpacity></>:<Text style={{color:fg,textAlign:'center'}}>{places.length?places.length+' места · допри точка на мапата':'Избери категорија или пребарај место'}</Text>}
     {!!routeInfo&&<Text style={{color:fg,textAlign:'center'}}>{routeInfo}</Text>}
-    <Text style={{color:fg,fontSize:11,textAlign:'center'}}>Пробни рути · не користи за возење во реално време</Text>
+    <Text style={{color:dark?'#aeb8c7':'#66758b',fontSize:10,textAlign:'center'}}>© OpenStreetMap contributors · Пробни рути, не за навигација при возење</Text>
    </View>
   </View>
-  <View style={[styles.footer,{backgroundColor:bg}]}><Text style={{color:fg,fontWeight:"700"}}>📍 Истражи</Text><TouchableOpacity onPress={()=>Alert.alert("Зачувани","Омилени места ќе бидат достапни наскоро.")}><Text style={{color:fg}}>☆ Зачувани</Text></TouchableOpacity><TouchableOpacity onPress={()=>Alert.alert("MK SPOTS","Верзија 0.4 · Македонија")}><Text style={{color:fg}}>☰ Повеќе</Text></TouchableOpacity></View>
  </SafeAreaView>;
 }
-const styles=StyleSheet.create({root:{flex:1},header:{padding:12,gap:10,zIndex:5},title:{fontSize:20,fontWeight:'800'},search:{borderRadius:12,padding:12},chips:{flexDirection:'row',gap:8,marginTop:2},chip:{paddingHorizontal:12,paddingVertical:9,borderRadius:20},mapButtons:{position:'absolute',right:12,top:16,gap:10},floating:{borderRadius:14,padding:13,elevation:3,alignItems:'center'},results:{position:'absolute',top:155,left:16,right:16,borderRadius:12,elevation:8,zIndex:10},result:{padding:14,borderBottomWidth:0.5,borderBottomColor:'#8885'},mapWrap:{flex:1},map:{flex:1},loading:{...StyleSheet.absoluteFillObject,alignItems:'center',justifyContent:'center',padding:20},controls:{position:'absolute',bottom:12,left:12,right:12,borderRadius:14,padding:10,gap:8},button:{backgroundColor:'#2563eb',padding:12,borderRadius:10,alignItems:'center'},buttonText:{color:'white',fontWeight:'700'},footer:{padding:16,flexDirection:'row',justifyContent:'space-between'}});
+const styles=StyleSheet.create({
+ root:{flex:1},header:{padding:12,gap:10,zIndex:5},title:{fontSize:21,fontWeight:'800'},searchRow:{flexDirection:'row',gap:8},
+ search:{flex:1,borderRadius:14,paddingHorizontal:14,height:48},searchButton:{backgroundColor:'#2563eb',borderRadius:14,width:52,alignItems:'center',justifyContent:'center'},
+ white:{color:'white',fontWeight:'700',fontSize:17},cityRow:{gap:8},city:{padding:8,borderRadius:10},chips:{gap:8,paddingBottom:2},
+ chip:{paddingHorizontal:14,paddingVertical:11,borderRadius:24},mapWrap:{flex:1},map:{flex:1},
+ loading:{...StyleSheet.absoluteFillObject,alignItems:'center',justifyContent:'center',gap:10},
+ mapButtons:{position:'absolute',right:12,top:16,gap:10},floating:{borderRadius:14,padding:13,elevation:3,alignItems:'center'},
+ bottomPanel:{position:'absolute',bottom:12,left:12,right:12,borderRadius:18,padding:14,gap:9,elevation:4},
+ placeTitle:{fontSize:18,fontWeight:'700'},primary:{backgroundColor:'#2563eb',borderRadius:12,padding:13,alignItems:'center'}
+});
