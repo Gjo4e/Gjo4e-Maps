@@ -1,5 +1,5 @@
 import React, {useMemo, useRef, useState} from 'react';
-import {ActivityIndicator, Alert, SafeAreaView, StatusBar, StyleSheet, Text, TextInput, TouchableOpacity, useColorScheme, View} from 'react-native';
+import {ActivityIndicator, Alert, SafeAreaView, ScrollView, StatusBar, StyleSheet, Text, TextInput, TouchableOpacity, useColorScheme, View} from 'react-native';
 import * as Location from 'expo-location';
 import MapLibreGL from '@maplibre/maplibre-react-native';
 import boundary from './src/data/macedonia-boundary.json';
@@ -10,7 +10,7 @@ type Coord = [number,number];
 const withinBounds = (p: Coord) => p[0]>=20.35 && p[0]<=23.15 && p[1]>=40.8 && p[1]<=42.45;
 export default function App() {
  const dark=useColorScheme()==='dark', bg=dark?'#101827':'#f4f7fa', fg=dark?'#fff':'#111827';
- const [query,setQuery]=useState(''), [ready,setReady]=useState(false);
+ const [query,setQuery]=useState(''), [ready,setReady]=useState(false);\n const [tilted,setTilted]=useState(false), [category,setCategory]=useState('Истражи');
  const [origin,setOrigin]=useState<Coord|null>(null),[destination,setDestination]=useState<Coord|null>(null);
  const [route,setRoute]=useState<any>(null),[routeInfo,setRouteInfo]=useState(''),[busy,setBusy]=useState(false);
  const camera=useRef<any>(null);
@@ -56,25 +56,25 @@ export default function App() {
   <View style={[styles.header,{backgroundColor:bg}]}>
    <Text style={[styles.title,{color:fg}]}>🇲🇰 MK SPOTS</Text>
    <TextInput value={query} onChangeText={setQuery} placeholder="Пребарај град во Македонија" placeholderTextColor="#8993a3" style={[styles.search,{color:fg,backgroundColor:dark?'#1f2937':'#e5e7eb'}]}/>
-   {results.length>0&&<View style={[styles.results,{backgroundColor:dark?'#1f2937':'#fff'}]}>{results.map(city=><TouchableOpacity key={city.name} onPress={()=>chooseCity(city)} style={styles.result}><Text style={{color:fg}}>📍 {city.name}</Text></TouchableOpacity>)}</View>}
+   <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chips}>{["Истражи","Ресторани","Продавници","Бензински"].map(c=><TouchableOpacity key={c} onPress={()=>{setCategory(c);if(c!=="Истражи")Alert.alert(c,"Пребарување на сите објекти од оваа категорија ќе биде додадено со Places API.");}} style={[styles.chip,{backgroundColor:category===c?"#2563eb":dark?"#293345":"#e2e8f0"}]}><Text style={{color:category===c?"white":fg,fontWeight:"600"}}>{c}</Text></TouchableOpacity>)}</ScrollView>\n   {results.length>0&&<View style={[styles.results,{backgroundColor:dark?'#1f2937':'#fff'}]}>{results.map(city=><TouchableOpacity key={city.name} onPress={()=>chooseCity(city)} style={styles.result}><Text style={{color:fg}}>📍 {city.name}</Text></TouchableOpacity>)}</View>}
   </View>
   <View style={styles.mapWrap}>
    <MapLibreGL.MapView key={dark?'dark':'light'} style={styles.map} mapStyle={dark?DARK_STYLE:LIGHT_STYLE} onDidFinishLoadingMap={()=>setReady(true)} attributionEnabled={true}>
-    <MapLibreGL.Camera ref={camera} defaultSettings={{centerCoordinate:CENTER,zoomLevel:7.2}} maxBounds={CAMERA_BOUNDS} minZoomLevel={6.5} maxZoomLevel={19}/>
+    <MapLibreGL.Camera ref={camera} defaultSettings={{centerCoordinate:CENTER,zoomLevel:7.2,pitch:0}} maxBounds={CAMERA_BOUNDS} minZoomLevel={6.5} maxZoomLevel={19}/>
     <MapLibreGL.ShapeSource id="outside-country" shape={mask as any}><MapLibreGL.FillLayer id="outside-fill" style={{fillColor:bg,fillOpacity:1}}/></MapLibreGL.ShapeSource>
     {route&&<MapLibreGL.ShapeSource id="route" shape={route}><MapLibreGL.LineLayer id="route-line" style={{lineColor:'#2979ff',lineWidth:5,lineOpacity:0.9}}/></MapLibreGL.ShapeSource>}
     {origin&&<MapLibreGL.PointAnnotation id="my-position" coordinate={origin}/>}
     {destination&&<MapLibreGL.PointAnnotation id="destination" coordinate={destination}/>}
    </MapLibreGL.MapView>
    {!ready&&<View style={[styles.loading,{backgroundColor:bg}]}><ActivityIndicator/><Text style={{color:fg}}>Се вчитува мапата…</Text></View>}
-   <View style={[styles.controls,{backgroundColor:bg}]}>
+   <View style={styles.mapButtons}><TouchableOpacity onPress={()=>{setTilted(!tilted);camera.current?.setCamera({pitch:tilted?0:55,animationDuration:500});}} style={[styles.floating,{backgroundColor:bg}]}><Text style={{color:fg,fontWeight:"700"}}>{tilted?"2D":"3D"}</Text></TouchableOpacity><TouchableOpacity onPress={()=>Alert.alert("Satellite","За сателитски снимки ни треба лиценциран imagery provider. Засега е достапна деталната мапа.")} style={[styles.floating,{backgroundColor:bg}]}><Text style={{color:fg}}>▧ Слоеви</Text></TouchableOpacity></View>\n   <View style={[styles.controls,{backgroundColor:bg}]}>
     <TouchableOpacity disabled={busy} onPress={locate} style={styles.button}><Text style={styles.buttonText}>◎ Моја локација</Text></TouchableOpacity>
     <TouchableOpacity disabled={busy} onPress={calculateRoute} style={styles.button}><Text style={styles.buttonText}>➜ Пресметај рута</Text></TouchableOpacity>
     {!!routeInfo&&<Text style={{color:fg,textAlign:'center'}}>{routeInfo}</Text>}
     <Text style={{color:fg,fontSize:11,textAlign:'center'}}>Пробни рути · не користи за возење во реално време</Text>
    </View>
   </View>
-  <View style={[styles.footer,{backgroundColor:bg}]}><Text style={{color:fg}}>🗺️ Мапа</Text><Text style={{color:fg}}>Offline · 3D наскоро</Text></View>
+  <View style={[styles.footer,{backgroundColor:bg}]}><Text style={{color:fg,fontWeight:"700"}}>📍 Истражи</Text><TouchableOpacity onPress={()=>Alert.alert("Зачувани","Омилени места ќе бидат достапни наскоро.")}><Text style={{color:fg}}>☆ Зачувани</Text></TouchableOpacity><TouchableOpacity onPress={()=>Alert.alert("MK SPOTS","Верзија 0.4 · Македонија")}><Text style={{color:fg}}>☰ Повеќе</Text></TouchableOpacity></View>
  </SafeAreaView>;
 }
-const styles=StyleSheet.create({root:{flex:1},header:{padding:16,gap:10,zIndex:5},title:{fontSize:20,fontWeight:'800'},search:{borderRadius:12,padding:12},results:{position:'absolute',top:110,left:16,right:16,borderRadius:12,elevation:8,zIndex:10},result:{padding:14,borderBottomWidth:0.5,borderBottomColor:'#8885'},mapWrap:{flex:1},map:{flex:1},loading:{...StyleSheet.absoluteFillObject,alignItems:'center',justifyContent:'center',padding:20},controls:{position:'absolute',bottom:12,left:12,right:12,borderRadius:14,padding:10,gap:8},button:{backgroundColor:'#2563eb',padding:12,borderRadius:10,alignItems:'center'},buttonText:{color:'white',fontWeight:'700'},footer:{padding:16,flexDirection:'row',justifyContent:'space-between'}});
+const styles=StyleSheet.create({root:{flex:1},header:{padding:12,gap:10,zIndex:5},title:{fontSize:20,fontWeight:'800'},search:{borderRadius:12,padding:12},chips:{flexDirection:'row',gap:8,marginTop:2},chip:{paddingHorizontal:12,paddingVertical:9,borderRadius:20},mapButtons:{position:'absolute',right:12,top:16,gap:10},floating:{borderRadius:14,padding:13,elevation:3,alignItems:'center'},results:{position:'absolute',top:155,left:16,right:16,borderRadius:12,elevation:8,zIndex:10},result:{padding:14,borderBottomWidth:0.5,borderBottomColor:'#8885'},mapWrap:{flex:1},map:{flex:1},loading:{...StyleSheet.absoluteFillObject,alignItems:'center',justifyContent:'center',padding:20},controls:{position:'absolute',bottom:12,left:12,right:12,borderRadius:14,padding:10,gap:8},button:{backgroundColor:'#2563eb',padding:12,borderRadius:10,alignItems:'center'},buttonText:{color:'white',fontWeight:'700'},footer:{padding:16,flexDirection:'row',justifyContent:'space-between'}});
