@@ -1,0 +1,12 @@
+import { writeFile } from 'node:fs/promises';
+const r = await fetch('https://www.geoboundaries.org/api/current/gbOpen/MKD/ADM0/');
+if (!r.ok) throw Error('geoBoundaries metadata HTTP '+r.status);
+const meta = await r.json();
+const g = await fetch(meta.simplifiedGeometryGeoJSON || meta.gjDownloadURL);
+if (!g.ok) throw Error('Boundary download HTTP '+g.status);
+const data = await g.json();
+const features = data.type === 'FeatureCollection' ? data.features : [data];
+const feature = features.find(x => ['Polygon','MultiPolygon'].includes(x.geometry?.type));
+if (!feature) throw Error('Missing Macedonia boundary polygon');
+await writeFile('src/data/macedonia-boundary.json', JSON.stringify({type:'FeatureCollection',features:[feature]}));
+console.log('Downloaded Macedonia border');
