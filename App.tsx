@@ -137,6 +137,7 @@ export default function App(){
   <View style={styles.mapWrap}>
    <MapLibreGL.MapView key={dark?'dark':'light'} style={styles.map} mapStyle={dark?DARK_STYLE:LIGHT_STYLE} attributionEnabled onDidFinishLoadingMap={()=>setReady(true)} onRegionDidChange={(e:any)=>{const c=e?.geometry?.coordinates;if(Array.isArray(c)&&c.length===2)mapCenter.current=[c[0],c[1]];}}>
     <MapLibreGL.Camera ref={camera} defaultSettings={{centerCoordinate:CENTER,zoomLevel:7.2,pitch:0}} maxBounds={CAMERA_BOUNDS} minZoomLevel={6.5} maxZoomLevel={19}/>
+    {tilted&&<MapLibreGL.VectorSource id="buildings-source" url="https://tiles.openfreemap.org/planet"><MapLibreGL.FillExtrusionLayer id="buildings-3d" sourceLayerID="building" minZoomLevel={14} style={{fillExtrusionColor:dark?"#70839a":"#aab5c3",fillExtrusionHeight:["coalesce",["get","render_height"],["get","height"],12] as any,fillExtrusionBase:["coalesce",["get","render_min_height"],0] as any,fillExtrusionOpacity:0.85}}/></MapLibreGL.VectorSource>}
     <MapLibreGL.ShapeSource id="country-mask" shape={mask as any}><MapLibreGL.FillLayer id="mask-fill" style={{fillColor:bg,fillOpacity:1}}/></MapLibreGL.ShapeSource>
     <MapLibreGL.ShapeSource id="places" shape={points} onPress={(event:any)=>{const id=event?.features?.[0]?.properties?.id;const p=places.find(x=>x.id===id);if(p)choose(p);}}>
      <MapLibreGL.CircleLayer id="places-dots" style={{circleColor:'#2563eb',circleRadius:7,circleStrokeWidth:2,circleStrokeColor:'#ffffff'}}/>
@@ -147,7 +148,7 @@ export default function App(){
    </MapLibreGL.MapView>
    {!ready&&<View style={[styles.loading,{backgroundColor:bg}]}><ActivityIndicator/><Text style={{color:fg}}>Се вчитува мапата…</Text></View>}
    <View style={styles.mapButtons}>
-    <TouchableOpacity onPress={()=>{setTilted(!tilted);camera.current?.setCamera({pitch:tilted?0:55,animationDuration:450});}} style={[styles.floating,{backgroundColor:bg}]}><Text style={{color:fg,fontWeight:'700'}}>{tilted?'2D':'3D'}</Text></TouchableOpacity>
+    <TouchableOpacity onPress={()=>{setTilted(!tilted);camera.current?.setCamera({pitch:tilted?0:55,animationDuration:450});}} style={[styles.floating,{backgroundColor:bg}]}><Text style={{color:fg,fontWeight:'700'}}>{tilted?'2D':'3D 🏢'}</Text></TouchableOpacity>
     <TouchableOpacity onPress={locate} style={[styles.floating,{backgroundColor:bg}]}><Text style={{color:fg}}>◎ GPS</Text></TouchableOpacity>
     <TouchableOpacity onPress={()=>setShowFavorites(!showFavorites)} style={[styles.floating,{backgroundColor:bg}]}><Text style={{color:fg}}>☆ {favorites.length}</Text></TouchableOpacity>
    </View>
