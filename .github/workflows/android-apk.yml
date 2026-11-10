@@ -10,6 +10,7 @@ jobs:
     env:
       ANDROID_HOME: /usr/local/lib/android/sdk
       ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
+      CI: '1'
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -24,18 +25,31 @@ jobs:
           test -d "$ANDROID_HOME"
           echo "$ANDROID_HOME/platform-tools" >> "$GITHUB_PATH"
           echo "$ANDROID_HOME/cmdline-tools/latest/bin" >> "$GITHUB_PATH"
-          ls "$ANDROID_HOME"
       - name: Install dependencies
         run: npm install
       - name: Fetch Macedonia boundary
         run: npm run fetch:boundary
       - name: Generate Android native project
         run: npx expo prebuild --platform android --no-install
-      - name: Build debug APK
+      - name: Configure temporary signing for test APK
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('android/app/build.gradle')
+          s=p.read_text()
+          start=s.index('buildTypes {')
+          end=s.index('release {',start)
+          release=s[end:]
+          if 'signingConfig signingConfigs.debug' not in release.split('}',1)[0]:
+              s=s[:end]+s[end:].replace('release {','release {\n            signingConfig signingConfigs.debug',1)
+              p.write_text(s)
+          PY
+      - name: Build standalone release APK with bundled JavaScript
         working-directory: android
-        run: chmod +x gradlew && ./gradlew assembleDebug --no-daemon
-      - name: Upload installable APK
+        run: chmod +x gradlew && ./gradlew assembleRelease --no-daemon
+      - name: Upload standalone APK
         uses: actions/upload-artifact@v4
         with:
-          name: MK-SPOTS-debug-APK
-          path: android/app/build/outputs/apk/debug/app-debug.apk
+          name: MK-SPOTS-standalone-APK
+          path: android/app/build/outputs/apk/release/app-release.apk
+          if-no-files-found: error
