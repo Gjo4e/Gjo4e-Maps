@@ -3,7 +3,7 @@
     "name": "MK SPOTS",
     "slug": "mk-spots",
     "scheme": "mkspots",
-    "version": "0.1.0",
+    "version": "0.7.0",
     "orientation": "portrait",
     "userInterfaceStyle": "automatic",
     "android": {
@@ -11,7 +11,8 @@
       "permissions": [
         "ACCESS_FINE_LOCATION",
         "ACCESS_COARSE_LOCATION"
-      ]
+      ],
+      "versionCode": 7
     },
     "plugins": [
       "@maplibre/maplibre-react-native"
