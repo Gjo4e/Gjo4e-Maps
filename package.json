@@ -1,0 +1,21 @@
+{
+  "name": "mk-spots",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "start": "expo start --dev-client",
+    "android": "expo run:android",
+    "fetch:boundary": "node scripts/fetch-boundary.mjs"
+  },
+  "dependencies": {
+    "expo": "~54.0.0",
+    "expo-status-bar": "~3.0.9",
+    "react": "19.1.0",
+    "react-native": "0.81.5",
+    "@maplibre/maplibre-react-native": "^10.0.0"
+  },
+  "devDependencies": {
+    "typescript": "~5.9.2",
+    "@types/react": "~19.1.0"
+  }
+}
