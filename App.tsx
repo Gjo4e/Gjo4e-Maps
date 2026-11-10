@@ -10,7 +10,8 @@ type Coord = [number,number];
 const withinBounds = (p: Coord) => p[0]>=20.35 && p[0]<=23.15 && p[1]>=40.8 && p[1]<=42.45;
 export default function App() {
  const dark=useColorScheme()==='dark', bg=dark?'#101827':'#f4f7fa', fg=dark?'#fff':'#111827';
- const [query,setQuery]=useState(''), [ready,setReady]=useState(false);\n const [tilted,setTilted]=useState(false), [category,setCategory]=useState('Истражи');
+ const [query,setQuery]=useState(''), [ready,setReady]=useState(false);
+ const [tilted,setTilted]=useState(false), [category,setCategory]=useState('Истражи');
  const [origin,setOrigin]=useState<Coord|null>(null),[destination,setDestination]=useState<Coord|null>(null);
  const [route,setRoute]=useState<any>(null),[routeInfo,setRouteInfo]=useState(''),[busy,setBusy]=useState(false);
  const camera=useRef<any>(null);
@@ -56,7 +57,8 @@ export default function App() {
   <View style={[styles.header,{backgroundColor:bg}]}>
    <Text style={[styles.title,{color:fg}]}>🇲🇰 MK SPOTS</Text>
    <TextInput value={query} onChangeText={setQuery} placeholder="Пребарај град во Македонија" placeholderTextColor="#8993a3" style={[styles.search,{color:fg,backgroundColor:dark?'#1f2937':'#e5e7eb'}]}/>
-   <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chips}>{["Истражи","Ресторани","Продавници","Бензински"].map(c=><TouchableOpacity key={c} onPress={()=>{setCategory(c);if(c!=="Истражи")Alert.alert(c,"Пребарување на сите објекти од оваа категорија ќе биде додадено со Places API.");}} style={[styles.chip,{backgroundColor:category===c?"#2563eb":dark?"#293345":"#e2e8f0"}]}><Text style={{color:category===c?"white":fg,fontWeight:"600"}}>{c}</Text></TouchableOpacity>)}</ScrollView>\n   {results.length>0&&<View style={[styles.results,{backgroundColor:dark?'#1f2937':'#fff'}]}>{results.map(city=><TouchableOpacity key={city.name} onPress={()=>chooseCity(city)} style={styles.result}><Text style={{color:fg}}>📍 {city.name}</Text></TouchableOpacity>)}</View>}
+   <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chips}>{["Истражи","Ресторани","Продавници","Бензински"].map(c=><TouchableOpacity key={c} onPress={()=>{setCategory(c);if(c!=="Истражи")Alert.alert(c,"Пребарување на сите објекти од оваа категорија ќе биде додадено со Places API.");}} style={[styles.chip,{backgroundColor:category===c?"#2563eb":dark?"#293345":"#e2e8f0"}]}><Text style={{color:category===c?"white":fg,fontWeight:"600"}}>{c}</Text></TouchableOpacity>)}</ScrollView>
+   {results.length>0&&<View style={[styles.results,{backgroundColor:dark?'#1f2937':'#fff'}]}>{results.map(city=><TouchableOpacity key={city.name} onPress={()=>chooseCity(city)} style={styles.result}><Text style={{color:fg}}>📍 {city.name}</Text></TouchableOpacity>)}</View>}
   </View>
   <View style={styles.mapWrap}>
    <MapLibreGL.MapView key={dark?'dark':'light'} style={styles.map} mapStyle={dark?DARK_STYLE:LIGHT_STYLE} onDidFinishLoadingMap={()=>setReady(true)} attributionEnabled={true}>
@@ -67,7 +69,8 @@ export default function App() {
     {destination&&<MapLibreGL.PointAnnotation id="destination" coordinate={destination}/>}
    </MapLibreGL.MapView>
    {!ready&&<View style={[styles.loading,{backgroundColor:bg}]}><ActivityIndicator/><Text style={{color:fg}}>Се вчитува мапата…</Text></View>}
-   <View style={styles.mapButtons}><TouchableOpacity onPress={()=>{setTilted(!tilted);camera.current?.setCamera({pitch:tilted?0:55,animationDuration:500});}} style={[styles.floating,{backgroundColor:bg}]}><Text style={{color:fg,fontWeight:"700"}}>{tilted?"2D":"3D"}</Text></TouchableOpacity><TouchableOpacity onPress={()=>Alert.alert("Satellite","За сателитски снимки ни треба лиценциран imagery provider. Засега е достапна деталната мапа.")} style={[styles.floating,{backgroundColor:bg}]}><Text style={{color:fg}}>▧ Слоеви</Text></TouchableOpacity></View>\n   <View style={[styles.controls,{backgroundColor:bg}]}>
+   <View style={styles.mapButtons}><TouchableOpacity onPress={()=>{setTilted(!tilted);camera.current?.setCamera({pitch:tilted?0:55,animationDuration:500});}} style={[styles.floating,{backgroundColor:bg}]}><Text style={{color:fg,fontWeight:"700"}}>{tilted?"2D":"3D"}</Text></TouchableOpacity><TouchableOpacity onPress={()=>Alert.alert("Satellite","За сателитски снимки ни треба лиценциран imagery provider. Засега е достапна деталната мапа.")} style={[styles.floating,{backgroundColor:bg}]}><Text style={{color:fg}}>▧ Слоеви</Text></TouchableOpacity></View>
+   <View style={[styles.controls,{backgroundColor:bg}]}>
     <TouchableOpacity disabled={busy} onPress={locate} style={styles.button}><Text style={styles.buttonText}>◎ Моја локација</Text></TouchableOpacity>
     <TouchableOpacity disabled={busy} onPress={calculateRoute} style={styles.button}><Text style={styles.buttonText}>➜ Пресметај рута</Text></TouchableOpacity>
     {!!routeInfo&&<Text style={{color:fg,textAlign:'center'}}>{routeInfo}</Text>}
